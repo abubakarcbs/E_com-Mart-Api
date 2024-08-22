@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "fastapi-helloworld"
+version = "0.1.0"
+description = ""
+authors = ["abubakarcbs <139690514+abubakarcbs@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.112.0"
+uvicorn = {extras = ["standard"], version = "^0.30.5"}
+sqlalchemy = "^2.0.32"
+sqlmodel = "^0.0.21"
+psycopg2-binary = "^2.9.9"
+aiokafka = "^0.11.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

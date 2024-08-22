@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+message user {
+    string user_namee = 1;
+    string user_email = 2;
+    optional string user_password = 3;
+    int user_phone = 4;
+}
