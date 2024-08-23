@@ -1,7 +1,7 @@
 # Use an official Python runtime as a parent image
 FROM python:3.12
 
-LABEL maintainer="ameen-alam"
+LABEL maintainer="Muhammad Abu Bakar"
 # Set the working directory in the container
 WORKDIR /code
 # Install system dependencies required for potential Python packages
@@ -24,7 +24,7 @@ RUN poetry config virtualenvs.create false
 RUN poetry install
 
 # Make port 8000 available to the world outside this container
-EXPOSE 8000
+EXPOSE 8007
 
 # Run the app. CMD can be overridden when starting the container
-CMD ["poetry", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--reload"]
+CMD ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port","8007", "--reload"]

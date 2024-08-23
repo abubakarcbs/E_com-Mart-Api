@@ -1,28 +1,40 @@
 from contextlib import asynccontextmanager
 import asyncio
+from typing import AsyncGenerator
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from app.db.db import create_tables, get_session
 from fastapi import Depends, FastAPI, HTTPException
 from typing import Annotated, List
 from sqlmodel import Session
 from app.model.inventory_model import Inventorys, InventoryUpdate
+import json
+
+
+
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    print('Creating Tables')
-    create_tables()
+async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
+    print('Creating Tables...')
+    # create_tables()
     print("Tables Created")
     # Start Kafka Consumer as a background task
     consumer_task = asyncio.create_task(consume_messages())
+    create_tables()
     yield
-    await consumer_task  # Ensure the consumer task is properly handled on shutdown
+    # await consumer_task  # Ensure the consumer task is properly handled on shutdown
 
 app = FastAPI(
     lifespan=lifespan, title="Inventory Page", version='1.0.0'
 )
 
+
 @app.get("/")
 def welcome():
+    return {"welcome": "Inventory Page"}
+
+@app.get("/test")
+def welcome():
+    create_tables()
     return {"welcome": "Inventory Page"}
 
 # Kafka Producer as a dependency
@@ -40,13 +52,17 @@ async def create_inventory(
     session: Session = Depends(get_session),
     producer: AIOKafkaProducer = Depends(get_kafka_producer)
 ):
-    db_inventory = Inventorys(**inventory.dict())
+    # Create a new instance of Inventorys using data from InventoryUpdate
+    db_inventory = Inventorys(**inventory.dict(exclude_unset=True))
     session.add(db_inventory)
     session.commit()
     session.refresh(db_inventory)
 
-    # Send Kafka message
-    await producer.send_and_wait("inventory_topic", f"Created: {db_inventory.id}".encode('utf-8'))
+    # Convert the inventory to a dictionary and send as a Kafka message
+    inventory_dict = {field: getattr(db_inventory, field) for field in db_inventory.__fields__.keys()}
+    inventory_json = json.dumps(inventory_dict).encode("utf-8")
+    
+    await producer.send_and_wait("inventory_topic", inventory_json)
 
     return db_inventory
 
