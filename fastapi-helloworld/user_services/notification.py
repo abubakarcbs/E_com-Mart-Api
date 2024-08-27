@@ -1,6 +1,6 @@
 import requests
 
-NOTIFICATION_SERVICE_URL = "http://127.0.0.1:8000/send-email/"
+NOTIFICATION_SERVICE_URL ="http://notification_service:8000/send-email/"
 
 def send_registration_email(user_email: str, username: str):
     payload = {

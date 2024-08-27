@@ -8,6 +8,8 @@ from sqlmodel import Session
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 import asyncio
 import json
+from sqlmodel import create_engine
+from sqlmodel import SQLModel, Session
 
 
 @asynccontextmanager
@@ -18,12 +20,18 @@ async def lifespan(app: FastAPI):
     consumer_task = asyncio.create_task(consume_messages())
     create_tables()
     yield
-    # await consumer_task
+    await consumer_task
 
 
-app = FastAPI(
-    lifespan=lifespan, title="Product Page", version='1.0.0'
-)
+app = FastAPI(lifespan=lifespan, title="Hello World API with DB", 
+    version="0.0.1",
+    servers=[
+        {
+            "url": "http://localhost:8000", # ADD NGROK URL Here Before Creating GPT Action
+            "description": "Development Server"
+        }
+        ]
+        )
 
 
 @app.get("/")
@@ -124,3 +132,15 @@ async def consume_messages():
             print(f"Consumed message: {msg.value.decode('utf-8')}")
     finally:
         await consumer.stop()
+        
+
+
+        # Create engine
+engine = create_engine("sqlite:///database.db", connect_args={"check_same_thread": False})
+
+
+        # Test route
+@app.get("/test")
+def test_route():
+    SQLModel.metadata.create_all(engine)
+    return {"message": "This is a test route"}

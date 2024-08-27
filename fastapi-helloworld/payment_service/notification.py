@@ -1,6 +1,6 @@
 import requests
 
-NOTIFICATION_SERVICE_URL = "http://127.0.0.1:8000/send-email/"
+NOTIFICATION_SERVICE_URL = "http://notification_service:8000/send-email/"
 
 def send_payment_confirmation_email(email: str, name: str, order_id: int, amount: float, status: str):
     payload = {
