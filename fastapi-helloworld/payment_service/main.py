@@ -27,8 +27,15 @@ async def lifespan(app: FastAPI):
     create_tables()
     yield
 
-# FastAPI application instance with lifespan management
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, title="Hello World API with DB", 
+    version="0.0.1",
+    servers=[
+        {
+            "url": "http://localhost:8007", # ADD NGROK URL Here Before Creating GPT Action
+            "description": "Development Server"
+        }
+        ]
+        )
 
 # Dependency to get the database session
 def get_session():

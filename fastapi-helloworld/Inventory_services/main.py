@@ -4,37 +4,34 @@ from typing import AsyncGenerator
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from app.db.db import create_tables, get_session
 from fastapi import Depends, FastAPI, HTTPException
-from typing import Annotated, List
 from sqlmodel import Session
 from app.model.inventory_model import Inventorys, InventoryUpdate
 import json
 
-
-
-
 @asynccontextmanager
-async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print('Creating Tables...')
-    # create_tables()
+    create_tables()
     print("Tables Created")
     # Start Kafka Consumer as a background task
-    consumer_task = asyncio.create_task(consume_messages())
-    create_tables()
+    consumer_task = asyncio.create_task(consume_order_messages())
     yield
-    # await consumer_task  # Ensure the consumer task is properly handled on shutdown
+    # Ensure the consumer task is properly handled on shutdown
+    consumer_task.cancel()
+    await consumer_task
 
-app = FastAPI(
-    lifespan=lifespan, title="Inventory Page", version='1.0.0'
+app = FastAPI(lifespan=lifespan, title="Inventory Service API", 
+    version="0.0.1",
+    servers=[
+        {
+            "url": "http://localhost:8001",
+            "description": "Development Server"
+        }
+    ]
 )
-
 
 @app.get("/")
 def welcome():
-    return {"welcome": "Inventory Page"}
-
-@app.get("/test")
-def welcome():
-    create_tables()
     return {"welcome": "Inventory Page"}
 
 # Kafka Producer as a dependency
@@ -52,13 +49,11 @@ async def create_inventory(
     session: Session = Depends(get_session),
     producer: AIOKafkaProducer = Depends(get_kafka_producer)
 ):
-    # Create a new instance of Inventorys using data from InventoryUpdate
     db_inventory = Inventorys(**inventory.dict(exclude_unset=True))
     session.add(db_inventory)
     session.commit()
     session.refresh(db_inventory)
 
-    # Convert the inventory to a dictionary and send as a Kafka message
     inventory_dict = {field: getattr(db_inventory, field) for field in db_inventory.__fields__.keys()}
     inventory_json = json.dumps(inventory_dict).encode("utf-8")
     
@@ -82,7 +77,6 @@ async def update_inventory(
     session.commit()
     session.refresh(db_inventory)
     
-    # Send Kafka message
     await producer.send_and_wait("inventory_topic", f"Updated: {db_inventory.id}".encode('utf-8'))
 
     return db_inventory
@@ -104,16 +98,35 @@ async def delete_inventory(inventory_id: int, session: Session = Depends(get_ses
 
     return inventory
 
-# Kafka Consumer
-async def consume_messages():
+# Kafka Consumer for Order Messages
+async def consume_order_messages():
     consumer = AIOKafkaConsumer(
-        'inventory_topic',
+        'order_topic',
         bootstrap_servers='broker:19092',
         group_id="inventory-group"
     )
     await consumer.start()
     try:
         async for msg in consumer:
-            print(f"Consumed message: {msg.value.decode('utf-8')}")
+            order_data = json.loads(msg.value.decode('utf-8'))
+            is_available = check_inventory(order_data)
+            response = {
+                "order_id": order_data['id'],
+                "is_available": is_available
+            }
+            response_json = json.dumps(response).encode('utf-8')
+            producer = AIOKafkaProducer(bootstrap_servers='broker:19092')
+            await producer.start()
+            try:
+                await producer.send_and_wait("inventory_response_topic", response_json)
+            finally:
+                await producer.stop()
     finally:
         await consumer.stop()
+
+def check_inventory(order_data):
+    product_id = order_data['product_id']
+    required_quantity = order_data['quantity']
+    session = next(get_session())
+    inventory_item = session.get(Inventorys, product_id)
+    return inventory_item.quantity >= required_quantity if inventory_item else False

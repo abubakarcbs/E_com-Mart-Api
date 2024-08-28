@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from typing import Annotated, List
+from typing import Annotated
 from fastapi import FastAPI, HTTPException, Depends, logger
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from app.db.db import create_tables, get_session
@@ -7,10 +7,7 @@ from sqlmodel import Session
 from app.model.order_model import Order, OrderUpdate
 import json
 import asyncio
-import os
-from notification import send_order_confirmation_email
-
-
+from notification import send_order_confirmation_email  # Import the notification function
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,14 +15,20 @@ async def lifespan(app: FastAPI):
     create_tables()
     print("Tables Created")
     # Start Kafka Consumer as a background task
-    consumer_task = asyncio.create_task(consume_messages())
+    consumer_task = asyncio.create_task(consume_inventory_response())
     yield
     # Ensure the consumer task is properly handled on shutdown
     consumer_task.cancel()
     await consumer_task
 
-app = FastAPI(
-    lifespan=lifespan, title="Order Service", version='1.0.0'
+app = FastAPI(lifespan=lifespan, title="Order Service API", 
+    version="0.0.1",
+    servers=[
+        {
+            "url": "http://localhost:8003",
+            "description": "Development Server"
+        }
+    ]
 )
 
 # Kafka Producer as a dependency
@@ -40,12 +43,6 @@ async def get_kafka_producer():
 @app.get("/")
 def read_root():
     return {"Hello": "from order service"}
-
-
-
-
-
-
 
 @app.post("/order")
 async def create_order(
@@ -62,9 +59,8 @@ async def create_order(
         session.rollback()
         raise HTTPException(status_code=500, detail="Failed to save order to the database.")
 
-    # Convert db_order to a dictionary using pydantic's `.dict()` method
     try:
-        order_dict = db_order.dict()  # Use Pydantic's dict() method to avoid attribute errors
+        order_dict = db_order.dict()
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to serialize order data.")
     
@@ -92,12 +88,6 @@ async def create_order(
 
     return db_order
 
-
-
-
-
-
-
 @app.get("/order/{order_id}")
 def get_order(order_id: int, session: Annotated[Session, Depends(get_session)]):
     order = session.get(Order, order_id)
@@ -120,11 +110,10 @@ def update_order(
     session.commit()
     session.refresh(db_order)
 
-    # Publish the updated order to Kafka
     order_dict = {field: getattr(db_order, field) for field in db_order.__fields__.keys()}
     order_json = json.dumps(order_dict).encode("utf-8")
     
-    # await producer.send_and_wait("order_topic", order_json)
+    producer.send_and_wait("order_topic", order_json)
     
     return db_order
 
@@ -137,16 +126,24 @@ def delete_order(order_id: int, session: Annotated[Session, Depends(get_session)
     session.commit()
     return order
 
-# Kafka Consumer
-async def consume_messages():
+# Kafka Consumer for Inventory Responses
+async def consume_inventory_response():
     consumer = AIOKafkaConsumer(
-        "order_topic",
-        bootstrap_servers="broker:19092",
+        'inventory_response_topic',
+        bootstrap_servers='broker:19092',
         group_id="order-group"
     )
     await consumer.start()
     try:
         async for msg in consumer:
-            print(f"Consumed message: {msg.value.decode('utf-8')}")
+            response_data = json.loads(msg.value.decode('utf-8'))
+            order_id = response_data['order_id']
+            is_available = response_data['is_available']
+            if is_available:
+                print(f"Order {order_id}: Inventory available. Proceed with payment.")
+                # Logic to proceed with payment or further processing
+            else:
+                print(f"Order {order_id}: Inventory not available. Notify user.")
+                # Logic to handle inventory not available scenario
     finally:
         await consumer.stop()

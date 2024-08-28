@@ -1,18 +1,18 @@
 name: ai-mart-platform
 
 services:
-  # user_services:
-  #   image: user-mart-api:latest
-  #   build:
-  #     context: ./user_services
-  #     dockerfile: Dockerfile.dev
-  #   volumes:
-  #     - ./user_services:/code # Sync local development directory with the container
-  #   depends_on:
-  #     - broker
-  #     - postgres_db
-  #   ports:
-  #     - "8005:8005" # Expose container port 8000 to host port 8000
+  user_services:
+    image: user-mart-api:latest
+    build:
+      context: ./user_services
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./user_services:/code # Sync local development directory with the container
+    depends_on:
+      - broker
+      - postgres_db
+    ports:
+      - "8005:8005" # Expose container port 8000 to host port 8000
   
   Product_services:
     image: product-mart-api:latest
@@ -25,59 +25,59 @@ services:
       - broker
       - postgres_product_db
     ports:
-      - "8002:8000" # Expose container port 8000 to host port 8000
+      - "8002:8002" # Expose container port 8000 to host port 8000
 
-  # order_service:
-  #   image: order-mart-api:latest
-  #   build:
-  #     context: ./order_service
-  #     dockerfile: Dockerfile.dev
-  #   volumes:
-  #     - ./order_service:/code # Sync local development directory with the container
-  #   depends_on:
-  #     - broker
-  #     - postgres_order_db
-  #   ports:
-  #     - "8003:8003" # Expose container port 8000 to host port 8000
+  order_service:
+    image: order-mart-api:latest
+    build:
+      context: ./order_service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./order_service:/code # Sync local development directory with the container
+    depends_on:
+      - broker
+      - postgres_order_db
+    ports:
+      - "8003:8003" # Expose container port 8000 to host port 8000
 
-  # inventory_service:
-  #   image: inventory-mart-api:latest
-  #   build:
-  #     context: ./Inventory_services
-  #     dockerfile: Dockerfile.dev
-  #   volumes:
-  #     - ./inventory_services:/code # Sync local development directory with the container
-  #   depends_on:
-  #     - broker
-  #     - postgres_inventory_db
-  #   ports:
-  #     - "8001:8001" # Expose container port 8000 to host port 8000
+  inventory_service:
+    image: inventory-mart-api:latest
+    build:
+      context: ./Inventory_services
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./inventory_services:/code # Sync local development directory with the container
+    depends_on:
+      - broker
+      - postgres_inventory_db
+    ports:
+      - "8001:8001" # Expose container port 8000 to host port 8000
 
-  # notification_service:
-  #   image: notification-mart-api:latest
-  #   build:
-  #     context: ./notification_service
-  #     dockerfile: Dockerfile.dev
-  #   volumes:
-  #     - ./notification_service:/code # Sync local development directory with the container
-  #   depends_on:
-  #     - broker
-  #     - postgres_notification_db
-  #   ports:
-  #     - "8000:8000" # Expose container port 8000 to host port 8000
+  notification_service:
+    image: notification-mart-api:latest
+    build:
+      context: ./notification_service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./notification_service:/code # Sync local development directory with the container
+    depends_on:
+      - broker
+      - postgres_notification_db
+    ports:
+      - "8000:8000" # Expose container port 8000 to host port 8000
 
-  # payment_service:
-  #   image: payment-mart-api:latest
-  #   build:
-  #     context: ./payment_service
-  #     dockerfile: Dockerfile.dev
-  #   volumes:
-  #     - ./payment_service:/code # Sync local development directory with the container
-  #   depends_on:
-  #     - broker
-  #     - postgres_db
-  #   ports:
-  #     - "8007:8007" # Expose container port 8000 to host port 8000
+  payment_service:
+    image: payment-mart-api:latest
+    build:
+      context: ./payment_service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./payment_service:/code # Sync local development directory with the container
+    depends_on:
+      - broker
+      - postgres_db
+    ports:
+      - "8007:8007" # Expose container port 8000 to host port 8000
 
   postgres_db:
     image: postgres:latest # Use the official PostgreSQL image
@@ -92,31 +92,31 @@ services:
     volumes:
       - postgres_db:/var/lib/postgresql/data
 
-  # postgres_user_db:
-  #   image: postgres:latest # Use the official PostgreSQL image
-  #   restart: always
-  #   container_name: PostgresUserCont
-  #   environment:
-  #     - POSTGRES_USER=neobdb_owner
-  #     - POSTGRES_PASSWORD=1tAkJjDgBfv6
-  #     - POSTGRES_DB=neobdb
-  #   ports:
-  #     - "5481:5432"
-  #   volumes:
-  #     - postgres_user_db:/var/lib/postgresql/data
+  postgres_user_db:
+    image: postgres:latest # Use the official PostgreSQL image
+    restart: always
+    container_name: PostgresUserCont
+    environment:
+     - POSTGRES_USER=ziakhan
+     - POSTGRES_PASSWORD=my_password
+     - POSTGRES_DB=mydatabase
+    ports:
+      - "5483:5432"
+    volumes:
+      - postgres_user_db:/var/lib/postgresql/data
 
-  # postgres_order_db:
-  #   image: postgres:latest # Use the official PostgreSQL image
-  #   restart: always
-  #   container_name: PostgresOrderCont
-  #   environment:
-  #     - POSTGRES_USER=neobdb_owner
-  #     - POSTGRES_PASSWORD=1tAkJjDgBfv6
-  #     - POSTGRES_DB=neobdb
-  #   ports:
-  #     - "5482:5432"
-  #   volumes:
-  #     - postgres_order_db:/var/lib/postgresql/data
+  postgres_order_db:
+    image: postgres:latest # Use the official PostgreSQL image
+    restart: always
+    container_name: PostgresOrderCont
+    environment:
+      - POSTGRES_USER=ziakhan
+      - POSTGRES_PASSWORD=my_password
+      - POSTGRES_DB=mydatabase
+    ports:
+      - "5482:5432"
+    volumes:
+      - postgres_order_db:/var/lib/postgresql/data
 
 
   postgres_product_db:
@@ -132,44 +132,44 @@ services:
     volumes:
       - postgres_product_db:/var/lib/postgresql/data
 
-  # postgres_inventory_db:
-  #   image: postgres:latest # Use the official PostgreSQL image
-  #   restart: always
-  #   container_name: PostgresInventoryCont
-  #   environment:
-  #     - POSTGRES_USER=neobdb_owner
-  #     - POSTGRES_PASSWORD=1tAkJjDgBfv6
-  #     - POSTGRES_DB=neobdb
-  #   ports:
-  #     - "5484:5432"
-  #   volumes:
-  #     - postgres_inventory_db:/var/lib/postgresql/data
+  postgres_inventory_db:
+    image: postgres:latest # Use the official PostgreSQL image
+    restart: always
+    container_name: PostgresInventoryCont
+    environment:
+      - POSTGRES_USER=ziakhan
+      - POSTGRES_PASSWORD=my_password
+      - POSTGRES_DB=mydatabase
+    ports:
+      - "5484:5432"
+    volumes:
+      - postgres_inventory_db:/var/lib/postgresql/data
 
-  # postgres_notification_db:
-  #   image: postgres:latest # Use the official PostgreSQL image
-  #   restart: always
-  #   container_name: PostgresNotificationCont
-  #   environment:
-  #     - POSTGRES_USER=neobdb_owner
-  #     - POSTGRES_PASSWORD=1tAkJjDgBfv6
-  #     - POSTGRES_DB=neobdb
-  #   ports:
-  #     - "5485:5432"
-  #   volumes:
-  #     - postgres_notification_db:/var/lib/postgresql/data
+  postgres_notification_db:
+    image: postgres:latest # Use the official PostgreSQL image
+    restart: always
+    container_name: PostgresNotificationCont
+    environment:
+      - POSTGRES_USER=ziakhan
+      - POSTGRES_PASSWORD=my_password
+      - POSTGRES_DB=mydatabase
+    ports:
+      - "5485:5432"
+    volumes:
+      - postgres_notification_db:/var/lib/postgresql/data
 
-  # postgres_payment_db:
-  #   image: postgres:latest # Use the official PostgreSQL image
-  #   restart: always
-  #   container_name: PostgresPaymentCont
-  #   environment:
-  #     - POSTGRES_USER=neobdb_owner
-  #     - POSTGRES_PASSWORD=1tAkJjDgBfv6
-  #     - POSTGRES_DB=neobdb
-  #   ports:
-  #     - "5486:5432"
-  #   volumes:
-  #     - postgres_payment_db:/var/lib/postgresql/data
+  postgres_payment_db:
+    image: postgres:latest # Use the official PostgreSQL image
+    restart: always
+    container_name: PostgresPaymentCont
+    environment:
+      - POSTGRES_USER=ziakhan
+      - POSTGRES_PASSWORD=my_password
+      - POSTGRES_DB=mydatabase
+    ports:
+      - "5486:5432"
+    volumes:
+      - postgres_payment_db:/var/lib/postgresql/data
 
 
   broker:
@@ -211,16 +211,16 @@ volumes:
     driver: local
   postgres_product_db:
     driver: local
-  # postgres_inventory_db:
-  #   driver: local
-  # postgres_order_db:
-  #   driver: local
-  # postgres_user_db:
-  #   driver: local
-  # postgres_notification_db:
-  #   driver: local
-  # postgres_payment_db:
-  #   driver: local
+  postgres_inventory_db:
+    driver: local
+  postgres_order_db:
+    driver: local
+  postgres_user_db:
+    driver: local
+  postgres_notification_db:
+    driver: local
+  postgres_payment_db:
+    driver: local
 
 networks:
   default:

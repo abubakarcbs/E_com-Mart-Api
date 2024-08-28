@@ -11,6 +11,7 @@ from auth import EXPIRY_TIME, authenticate_user, create_access_token, create_ref
 from aiokafka import AIOKafkaProducer
 import json
 import asyncio
+from notification import send_registration_email
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,8 +20,15 @@ async def lifespan(app: FastAPI):
     print("Tables Created")
     yield
 
-app: FastAPI = FastAPI(
-    lifespan=lifespan, title="Welcome to user services", version='1.0.0')
+app = FastAPI(lifespan=lifespan, title="User Service API", 
+    version="0.0.1",
+    servers=[
+        {
+            "url": "http://localhost:8005",
+            "description": "Development Server"
+        }
+    ]
+)
 
 app.include_router(router=user.user_router)
 
@@ -36,6 +44,38 @@ async def get_kafka_producer():
         yield producer
     finally:
         await producer.stop()
+
+# User registration endpoint with Kafka and email notification integration
+@app.post('/register', response_model=User)
+async def register_user(
+    user: User, 
+    session: Annotated[Session, Depends(get_session)],
+    producer: AIOKafkaProducer = Depends(get_kafka_producer)
+):
+    try:
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Failed to register user.")
+
+    # Send registration notification email
+    email_sent = send_registration_email(user.email, user.username)
+    if not email_sent:
+        raise HTTPException(status_code=500, detail="Failed to send registration email.")
+
+    # Kafka message for successful registration
+    registration_message = json.dumps({
+        "event": "user_registration",
+        "username": user.username,
+        "email": user.email,
+        "timestamp": asyncio.get_event_loop().time()
+    }).encode("utf-8")
+
+    await producer.send_and_wait("user_events", registration_message)
+
+    return user
 
 # Login endpoint with Kafka integration
 @app.post('/token', response_model=Token)
@@ -65,7 +105,6 @@ async def login(
     await producer.send_and_wait("user_events", login_message)
 
     return Token(access_token=access_token, token_type="bearer", refresh_token=refresh_token)
-
 
 # Token Refresh with Kafka integration
 @app.post("/token/refresh")
