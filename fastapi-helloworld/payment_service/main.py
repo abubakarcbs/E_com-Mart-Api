@@ -1,3 +1,4 @@
+# payment_service/main.py
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import Session
 from app.model import Payment, PaymentCreate
@@ -20,14 +21,13 @@ STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
 
 stripe.api_key = STRIPE_SECRET_KEY
 
-# Context manager to manage the lifespan of the FastAPI app
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Creating tables..")
     create_tables()
     yield
 
-app = FastAPI(lifespan=lifespan, title="Hello World API with DB", 
+app = FastAPI(lifespan=lifespan, title="Hello World API with Order", 
     version="0.0.1",
     servers=[
         {
@@ -69,44 +69,33 @@ async def process_payment(
                 'price_data': {
                     'currency': 'usd',
                     'product_data': {
-                        'name': 'Order #' + str(payment.order_id),
+                        'name': payment.name,
                     },
-                    'unit_amount': payment.amount,
+                    'unit_amount': int(payment.amount * 100),
                 },
                 'quantity': 1,
             }],
             mode='payment',
-            success_url='https://yourdomain.com/success?session_id={CHECKOUT_SESSION_ID}',
-            cancel_url='https://yourdomain.com/cancel',
+            success_url=f"http://localhost:8007/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url="http://localhost:8007/cancel",
         )
-    except stripe.error.StripeError as e:
+    except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Step 2: Create payment record in the database with status 'unpaid'
-    payment_status = "unpaid"  # Set status to unpaid until payment is confirmed
+    # Step 2: Save payment details in the database
     db_payment = Payment(
-        email=payment.email,
+        stripe_checkout_id=checkout_session.id,
         name=payment.name,
-        order_id=payment.order_id,
+        email=payment.email,
         amount=payment.amount,
-        status=payment_status
+        status='pending',
+        order_id=payment.order_id
     )
     session.add(db_payment)
     session.commit()
     session.refresh(db_payment)
 
-    # Step 3: Send payment initiation email with status 'unpaid'
-    email_sent = send_payment_confirmation_email(
-        email=db_payment.email,
-        name=db_payment.name,
-        order_id=db_payment.order_id,
-        amount=db_payment.amount,
-        status=db_payment.status
-    )
-    if not email_sent:
-        print("Payment initiation email failed to send.")
-
-    # Step 4: Prepare Kafka message for the initiated payment
+    # Step 3: Produce a Kafka message for payment initiation
     payment_message = json.dumps({
         "event": "payment_initiated",
         "payment_id": db_payment.id,
@@ -152,7 +141,6 @@ async def process_payment(
 
         await producer.send_and_wait("payment_events", payment_message)
 
-    # Step 5: Return the Stripe Checkout session URL
     return {"checkout_url": checkout_session.url}
 
 async def confirm_payment(session_id: str):
