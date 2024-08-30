@@ -11,7 +11,7 @@ import json
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print('Creating Tables...')
     create_tables()
-    print("Tables Created")
+    print("Tables Created...")
     yield
 
 app = FastAPI(lifespan=lifespan, title="Product Service API", 

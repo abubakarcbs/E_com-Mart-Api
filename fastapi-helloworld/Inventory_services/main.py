@@ -1,72 +1,60 @@
-from contextlib import asynccontextmanager
 import asyncio
-from typing import AsyncGenerator
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
-from app.db.db import create_tables, get_session
-from fastapi import Depends, FastAPI, HTTPException
-from sqlmodel import Session
+from fastapi import FastAPI, HTTPException, Depends
+from sqlmodel import Session, select
+from app.db.db import get_session, create_tables
 from app.model.inventory_model import Inventorys, InventoryUpdate
 import json
+import logging
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    print('Creating Tables...')
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+app = FastAPI(title="Inventory Service API", 
+              version="0.0.1",
+              servers=[
+                  {
+                      "url": "http://localhost:8001",
+                      "description": "Development Server"
+                  }
+              ])
+
+# Initialize Kafka Producer
+producer = AIOKafkaProducer(bootstrap_servers='broker:19092')
+
+@app.on_event("startup")
+async def startup_event():
+    # Create tables
     create_tables()
-    print("Tables Created")
-    # Start Kafka Consumer as a background task
-    consumer_task = asyncio.create_task(consume_order_messages())
-    yield
-    # Ensure the consumer task is properly handled on shutdown
-    consumer_task.cancel()
-    await consumer_task
+    
+    # Start the Kafka producer
+    await producer.start()
+    
+    # Start Kafka consumers
+    asyncio.create_task(consume_order_messages())
+    asyncio.create_task(consume_product_messages())
 
-app = FastAPI(lifespan=lifespan, title="Inventory Service API", 
-    version="0.0.1",
-    servers=[
-        {
-            "url": "http://localhost:8001",
-            "description": "Development Server"
-        }
-    ]
-)
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Stop the Kafka producer
+    await producer.stop()
+
+    # Note: Consumers will automatically stop when the application shuts down
 
 @app.get("/")
 def welcome():
     return {"welcome": "Inventory Page"}
 
-# Kafka Producer as a dependency
-async def get_kafka_producer():
-    producer = AIOKafkaProducer(bootstrap_servers='broker:19092')
-    await producer.start()
-    try:
-        yield producer
-    finally:
-        await producer.stop()
-
-@app.post("/inventory", response_model=Inventorys)
-async def create_inventory(
-    inventory: InventoryUpdate, 
-    session: Session = Depends(get_session),
-    producer: AIOKafkaProducer = Depends(get_kafka_producer)
-):
-    db_inventory = Inventorys(**inventory.dict(exclude_unset=True))
-    session.add(db_inventory)
-    session.commit()
-    session.refresh(db_inventory)
-
-    inventory_dict = {field: getattr(db_inventory, field) for field in db_inventory.__fields__.keys()}
-    inventory_json = json.dumps(inventory_dict).encode("utf-8")
-    
-    await producer.send_and_wait("inventory_topic", inventory_json)
-
-    return db_inventory
+@app.get("/inventory/all", response_model=list[Inventorys])
+async def get_all_inventory(session: Session = Depends(get_session)):
+    inventories = session.exec(select(Inventorys)).all()
+    return inventories
 
 @app.put("/inventory/{inventory_id}", response_model=Inventorys)
 async def update_inventory(
     inventory_id: int, 
     inventory: InventoryUpdate, 
-    session: Session = Depends(get_session),
-    producer: AIOKafkaProducer = Depends(get_kafka_producer)
+    session: Session = Depends(get_session)
 ):
     db_inventory = session.get(Inventorys, inventory_id)
     
@@ -78,6 +66,7 @@ async def update_inventory(
     session.refresh(db_inventory)
     
     await producer.send_and_wait("inventory_topic", f"Updated: {db_inventory.id}".encode('utf-8'))
+    logging.info(f"Sent update message for inventory_id {db_inventory.id} to inventory_topic")
 
     return db_inventory
 
@@ -98,7 +87,6 @@ async def delete_inventory(inventory_id: int, session: Session = Depends(get_ses
 
     return inventory
 
-# Kafka Consumer for Order Messages
 async def consume_order_messages():
     consumer = AIOKafkaConsumer(
         'order_topic',
@@ -109,24 +97,63 @@ async def consume_order_messages():
     try:
         async for msg in consumer:
             order_data = json.loads(msg.value.decode('utf-8'))
-            is_available = check_inventory(order_data)
+            logging.info(f"Received order data: {order_data}")
+            
+            # Retrieve product name for response
+            session = next(get_session())
+            product_id = order_data['product_id']
+            inventory_item = session.get(Inventorys, product_id)
+            
+            if inventory_item:
+                product_name = inventory_item.name
+                is_available = reserve_inventory(order_data)  # Reserve inventory only if the item exists
+            else:
+                product_name = "Unknown Product"
+                is_available = False  # Mark as not available since the product doesn't exist
+            
             response = {
-                "order_id": order_data['id'],
+                "product_name": product_name,
                 "is_available": is_available
             }
+            
             response_json = json.dumps(response).encode('utf-8')
-            producer = AIOKafkaProducer(bootstrap_servers='broker:19092')
-            await producer.start()
-            try:
-                await producer.send_and_wait("inventory_response_topic", response_json)
-            finally:
-                await producer.stop()
+            await producer.send_and_wait("inventory_response_topic", response_json)
+            logging.info(f"Sent inventory response for product {product_name}")
     finally:
         await consumer.stop()
 
-def check_inventory(order_data):
+async def consume_product_messages():
+    consumer = AIOKafkaConsumer(
+        'product_topic',
+        bootstrap_servers='broker:19092',
+        group_id="inventory-group"
+    )
+    await consumer.start()
+    try:
+        async for msg in consumer:
+            product_data = json.loads(msg.value.decode('utf-8'))
+            logging.info(f"Received product data: {product_data}")
+            add_product_to_inventory(product_data)  # Add product to inventory
+    finally:
+        await consumer.stop()
+
+def reserve_inventory(order_data):
     product_id = order_data['product_id']
     required_quantity = order_data['quantity']
     session = next(get_session())
     inventory_item = session.get(Inventorys, product_id)
-    return inventory_item.quantity >= required_quantity if inventory_item else False
+    
+    if inventory_item and inventory_item.quantity >= required_quantity:
+        inventory_item.quantity -= required_quantity  # Reserve inventory
+        session.commit()  # Commit the changes to the database
+        logging.info(f"Reserved {required_quantity} of product_id {product_id}")
+        return True
+    logging.warning(f"Failed to reserve {required_quantity} of product_id {product_id}")
+    return False
+
+def add_product_to_inventory(product_data):
+    session = next(get_session())
+    new_product = Inventorys(**product_data)
+    session.add(new_product)
+    session.commit()
+    logging.info(f"Added new product to inventory: {new_product}")
