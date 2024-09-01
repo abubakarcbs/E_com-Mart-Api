@@ -1,12 +1,15 @@
-# notification_service/app/models.py
+from sqlmodel import create_engine, SQLModel, Session
+from app.db import setting
 
-from sqlmodel import SQLModel, Field
-from typing import Optional
-from datetime import datetime
+connection_string: str = str(setting.DATABASE_URL).replace(
+    "postgresql", "postgresql+psycopg")
+engine = create_engine(connection_string, connect_args={}, pool_recycle=300, pool_size=10)
 
-class Notification(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    recipient_id: str
-    message: str
-    notification_type: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+def create_tables():
+    SQLModel.metadata.create_all(engine)
+
+
+def get_session():
+    with Session(engine) as session:
+        yield session
+        

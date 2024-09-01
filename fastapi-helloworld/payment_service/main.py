@@ -1,8 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import Session
 from app.model import Payment, PaymentCreate
-from notification import send_payment_confirmation_email
-from app.db.db import create_tables, engine
+from app.db.db import get_session, create_tables, engine
 import stripe
 from dotenv import load_dotenv
 import os
@@ -10,6 +9,9 @@ from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 import json
 import asyncio
 from contextlib import asynccontextmanager
+import logging
+from get_email import get_user_email
+from get_payment import fetch_order_data, fetch_user_data
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -20,11 +22,14 @@ STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
 
 stripe.api_key = STRIPE_SECRET_KEY
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Creating tables...")
     create_tables()
-    
+    print("Tables created...")
     # Initialize Kafka Consumer to listen to order_topic
     order_consumer_task = asyncio.create_task(consume_order_messages())
     
@@ -69,7 +74,7 @@ async def consume_order_messages():
     try:
         async for msg in consumer:
             order_data = json.loads(msg.value.decode('utf-8'))
-            print(f"Received order data: {order_data}")
+            logging.info(f"Received order data: {order_data}")
             # Process payment based on order data
             await initiate_payment_process(order_data)
     finally:
@@ -79,12 +84,16 @@ async def consume_order_messages():
 async def initiate_payment_process(order_data):
     session = next(get_session())
 
+    # Fetch user email based on user_id
+    user_email = get_user_email(order_data['userid'])
+
     # Create payment data
     payment_data = PaymentCreate(
         order_id=order_data['id'],
         name=order_data['customer_name'],  # Assuming order data has customer_name
-        email=order_data.get('customer_email', 'customer@example.com'),  # Replace this with the actual email from order data
-        amount=order_data['total_amount']  # Assuming order data has total_amount
+        email=user_email,  # Use the fetched email
+        amount=order_data['total_amount'],  # Assuming order data has total_amount
+        status='pending'  # Initial status
     )
 
     # Call the process_payment function with the created payment data
@@ -96,6 +105,23 @@ async def process_payment(
     session: Session = Depends(get_session),
     producer: AIOKafkaProducer = Depends(get_kafka_producer)
 ):
+    # Fetch the order details using the order_id to get the correct total_amount and other details
+    order_data = await fetch_order_data(payment.order_id)
+
+    if not order_data:
+        raise HTTPException(status_code=404, detail=f"Order with ID '{payment.order_id}' not found.")
+
+    # Fetch the user details using the user_id
+    user_data = await fetch_user_data(order_data["userid"])
+
+    if not user_data:
+        raise HTTPException(status_code=404, detail=f"User with ID '{order_data['userid']}' not found.")
+
+    # Use the fetched total_amount and user details (name and email)
+    total_amount = order_data['total_amount']
+    username = user_data['username']
+    email = user_data['email']
+    
     # Step 1: Create a Stripe Checkout Session
     try:
         checkout_session = stripe.checkout.Session.create(
@@ -104,9 +130,9 @@ async def process_payment(
                 'price_data': {
                     'currency': 'usd',
                     'product_data': {
-                        'name': payment.name,
+                        'name': username,  # Use fetched username for product name
                     },
-                    'unit_amount': int(payment.amount * 100),
+                    'unit_amount': int(total_amount * 100),  # Use fetched total_amount
                 },
                 'quantity': 1,
             }],
@@ -120,9 +146,9 @@ async def process_payment(
     # Step 2: Save payment details in the database
     db_payment = Payment(
         stripe_checkout_id=checkout_session.id,
-        name=payment.name,
-        email=payment.email,
-        amount=payment.amount,
+        name=username,  # Use fetched username
+        email=email,  # Use fetched email
+        amount=total_amount,  # Save the fetched total_amount
         status='pending',
         order_id=payment.order_id
     )
@@ -134,7 +160,6 @@ async def process_payment(
     payment_message = json.dumps({
         "event": "payment_initiated",
         "payment_id": db_payment.id,
-        "email": db_payment.email,
         "name": db_payment.name,
         "order_id": db_payment.order_id,
         "amount": db_payment.amount,
@@ -150,17 +175,6 @@ async def process_payment(
         db_payment.status = "paid"
         session.commit()
         session.refresh(db_payment)
-
-        # Send payment confirmation email with status 'paid'
-        email_sent = send_payment_confirmation_email(
-            email=db_payment.email,
-            name=db_payment.name,
-            order_id=db_payment.order_id,
-            amount=db_payment.amount,
-            status=db_payment.status
-        )
-        if not email_sent:
-            print("Payment confirmation email failed to send.")
 
         # Produce a message to payment_response_topic indicating payment completion
         payment_response_message = json.dumps({
@@ -179,3 +193,27 @@ async def confirm_payment(session_id: str):
     # Simulate payment confirmation process
     await asyncio.sleep(5)  # Simulate some delay for payment confirmation
     return True  # In a real application, you would query Stripe or listen to a webhook
+
+@app.get("/payment-details/{order_id}")
+async def get_payment_details(order_id: int):
+    # Fetch the order details based on order_id
+    order_data = await fetch_order_data(order_id)
+
+    if not order_data:
+        raise HTTPException(status_code=404, detail=f"Order with ID '{order_id}' not found.")
+    
+    # Fetch the user details based on user_id from the user service
+    user_data = await fetch_user_data(order_data["userid"])  # Only pass user_id
+
+    if not user_data:
+        raise HTTPException(status_code=404, detail=f"User with ID '{order_data['userid']}' not found.")
+    
+    # Prepare the payment details response
+    payment_details = {
+        "order_id": order_data["id"],
+        "username": user_data["username"],  # Using fetched username
+        "email": user_data["email"],  # Using fetched email
+        "total_amount": order_data["total_amount"]  # Assuming order_data has total_amount
+    }
+    
+    return payment_details

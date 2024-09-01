@@ -11,13 +11,17 @@ from auth import EXPIRY_TIME, authenticate_user, create_access_token, create_ref
 from aiokafka import AIOKafkaProducer
 import json
 import asyncio
-from notification import send_registration_email
+import logging
+from aiokafka.errors import KafkaError
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print('Creating Tables')
+    logging.info('Creating Tables...')
     create_tables()
-    print("Tables Created")
+    logging.info("Tables Created...")
     yield
 
 app = FastAPI(lifespan=lifespan, title="User Service API", 
@@ -45,7 +49,17 @@ async def get_kafka_producer():
     finally:
         await producer.stop()
 
-# User registration endpoint with Kafka and email notification integration
+# Function to produce Kafka messages with logging and exception handling
+async def produce_kafka_message(producer, topic, message):
+    try:
+        logging.info(f"Attempting to send message to topic {topic}: {message}")
+        await producer.send_and_wait(topic, message)
+        logging.info(f"Message sent to topic {topic} successfully.")
+    except KafkaError as e:
+        logging.error(f"Failed to send message to Kafka: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send message to Kafka.")
+
+# User registration endpoint with Kafka notification integration
 @app.post('/register', response_model=User)
 async def register_user(
     user: User, 
@@ -56,14 +70,11 @@ async def register_user(
         session.add(user)
         session.commit()
         session.refresh(user)
+        logging.info(f"User registered successfully: {user.username}")
     except Exception as e:
         session.rollback()
+        logging.error(f"Failed to register user: {e}")
         raise HTTPException(status_code=500, detail="Failed to register user.")
-
-    # Send registration notification email
-    email_sent = send_registration_email(user.email, user.username)
-    if not email_sent:
-        raise HTTPException(status_code=500, detail="Failed to send registration email.")
 
     # Kafka message for successful registration
     registration_message = json.dumps({
@@ -73,7 +84,8 @@ async def register_user(
         "timestamp": asyncio.get_event_loop().time()
     }).encode("utf-8")
 
-    await producer.send_and_wait("user_events", registration_message)
+    # Produce Kafka message with logging
+    await produce_kafka_message(producer, "user_events", registration_message)
 
     return user
 
@@ -86,6 +98,7 @@ async def login(
 ):
     user = authenticate_user(form_data.username, form_data.password, session)
     if not user:
+        logging.warning(f"Failed login attempt for username: {form_data.username}")
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
     expire_time = timedelta(minutes=EXPIRY_TIME)
@@ -102,7 +115,8 @@ async def login(
         "timestamp": asyncio.get_event_loop().time()
     }).encode("utf-8")
 
-    await producer.send_and_wait("user_events", login_message)
+    # Produce Kafka message with logging
+    await produce_kafka_message(producer, "user_events", login_message)
 
     return Token(access_token=access_token, token_type="bearer", refresh_token=refresh_token)
 
@@ -121,6 +135,7 @@ async def refresh_token(
     
     user = validate_refresh_token(old_refresh_token, session)
     if not user:
+        logging.warning(f"Failed token refresh attempt for token: {old_refresh_token}")
         raise credential_exception
     
     expire_time = timedelta(minutes=EXPIRY_TIME)
@@ -137,6 +152,14 @@ async def refresh_token(
         "timestamp": asyncio.get_event_loop().time()
     }).encode("utf-8")
 
-    await producer.send_and_wait("user_events", refresh_message)
+    # Produce Kafka message with logging
+    await produce_kafka_message(producer, "user_events", refresh_message)
 
     return Token(access_token=access_token, token_type="bearer", refresh_token=refresh_token)
+
+@app.get("/user/{userid}")
+def read_user(userid: int, db: Session = Depends(get_session)):
+    user = db.query(User).filter(User.userid == userid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User with ID '{userid}' not found.")
+    return user

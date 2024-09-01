@@ -66,6 +66,7 @@ services:
     ports:
       - "8000:8000" # Expose container port 8000 to host port 8000
 
+
   payment_service:
     image: payment-mart-api:latest
     build:
@@ -83,18 +84,18 @@ services:
 
 
 
-  z_realtime_service:
-    image: z-realtime-mart-api:latest
-    build:
-      context: ./z_realtime_service
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./z_realtime_service:/code # Sync local development directory with the container
-    depends_on:
-      - broker
-      - postgres_db
-    ports:
-      - "8008:8008" # Expose container port 8000 to host port 8000
+  # z_realtime_service:
+  #   image: z-realtime-mart-api:latest
+  #   build:
+  #     context: ./z_realtime_service
+  #     dockerfile: Dockerfile.dev
+  #   volumes:
+  #     - ./z_realtime_service:/code # Sync local development directory with the container
+  #   depends_on:
+  #     - broker
+  #     - postgres_db
+  #   ports:
+  #     - "8008:8008" # Expose container port 8000 to host port 8000
 
 
 
@@ -194,20 +195,18 @@ services:
 
 
 
-
-
-  postgres_z_realtime_db:
-    image: postgres:latest # Use the official PostgreSQL image
-    restart: always
-    container_name: PostgresZRealtimeCont
-    environment:
-      - POSTGRES_USER=ziakhan
-      - POSTGRES_PASSWORD=my_password
-      - POSTGRES_DB=mydatabase
-    ports:
-      - "5487:5432"
-    volumes:
-      - postgres_z_realtime_db:/var/lib/postgresql/data
+  # postgres_z_realtime_db:
+  #   image: postgres:latest # Use the official PostgreSQL image
+  #   restart: always
+  #   container_name: PostgresZRealtimeCont
+  #   environment:
+  #     - POSTGRES_USER=ziakhan
+  #     - POSTGRES_PASSWORD=my_password
+  #     - POSTGRES_DB=mydatabase
+  #   ports:
+  #     - "5487:5432"
+  #   volumes:
+  #     - postgres_z_realtime_db:/var/lib/postgresql/data
 
 
 
@@ -261,8 +260,9 @@ volumes:
     driver: local
   postgres_payment_db:
     driver: local
-  postgres_z_realtime_db:
-    driver: local
+  # postgres_z_realtime_db:
+  #   driver: local
+ 
 
 networks:
   default:

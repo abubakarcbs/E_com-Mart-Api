@@ -1,14 +1,14 @@
 from contextlib import asynccontextmanager
 from typing import Annotated
-from fastapi import FastAPI, HTTPException, Depends, logger
+from fastapi import FastAPI, HTTPException, Depends
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from app.db.db import create_tables, get_session
 from sqlmodel import Session
 from app.model.order_model import Order, OrderUpdate
 import json
 import asyncio
-from notification import send_order_confirmation_email  # Import the notification function
 import logging
+from get_email import get_user_email
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +70,14 @@ async def create_order(
     session: Annotated[Session, Depends(get_session)],
     producer: AIOKafkaProducer = Depends(lambda: app.state.producer)
 ):
+    # First, attempt to fetch the user's email using user_id
+    try:
+        user_email = get_user_email(order.userid)  # Fetch email via API using user_id
+    except HTTPException as e:
+        logging.error(f"Failed to retrieve email for user ID '{order.userid}': {e.detail}")
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+    # Attempt to save the order to the database
     try:
         db_order = Order(**order.dict())  
         session.add(db_order)             
@@ -79,34 +87,36 @@ async def create_order(
         session.rollback()
         raise HTTPException(status_code=500, detail="Failed to save order to the database.")
 
+    # If the order is saved, produce the Kafka messages
     try:
         order_dict = db_order.dict()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to serialize order data.")
-    
-    order_json = json.dumps(order_dict).encode("utf-8")
+        order_json = json.dumps(order_dict).encode("utf-8")
 
-    try:
+        # Produce to the first Kafka topic
         await producer.send_and_wait("order_topic", order_json)
+
+        # Now produce the order confirmation message to Kafka
+        order_confirmation_message = json.dumps({
+            "event": "order_placed",
+            "order_id": db_order.id,
+            "user_id": db_order.userid,
+            "user_email": user_email,
+            "order_details": f"Product ID: {db_order.product_id}, Quantity: {db_order.quantity}, Total Price: {db_order.total_amount}",
+            "timestamp": asyncio.get_event_loop().time()
+        }).encode("utf-8")
+
+        await producer.send_and_wait("order_events", order_confirmation_message)
+        logging.info(f"Order {db_order.id} created and notification sent via Kafka.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to publish order to Kafka.")
-    
-    # Send order confirmation email notification
-    try:
-        order_details = f"Product ID: {db_order.id}, Quantity: {db_order.quantity}, Total Price: {db_order.total_amount}"
-        email_sent = send_order_confirmation_email(
-            order_id=db_order.id,
-            user_email="customer@example.com",  # Replace with actual user's email
-            order_details=order_details
-        )
-        if not email_sent:
-            logger.error(f"Order {db_order.id} created but failed to send notification email.")
-    except AttributeError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to access order attributes: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to send confirmation email.")
+        logging.error(f"Order {db_order.id} created but failed to send notification via Kafka: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process order notification due to: {str(e)}")
 
     return db_order
+
+
+
+
+    
 
 @app.get("/order/{order_id}")
 def get_order(order_id: int, session: Annotated[Session, Depends(get_session)]):
@@ -130,7 +140,7 @@ async def update_order(
     session.commit()
     session.refresh(db_order)
 
-    order_dict = {field: getattr(db_order, field) for field in db_order.__fields__.keys()}
+    order_dict = db_order.dict()
     order_json = json.dumps(order_dict).encode("utf-8")
     
     await producer.send_and_wait("order_topic", order_json)
@@ -160,10 +170,10 @@ async def consume_inventory_response(producer):
             product_name = response_data['product_name']
             is_available = response_data['is_available']
             if is_available:
-                print(f"Product {product_name}: Inventory available. Proceed with payment.")
+                logging.info(f"Product {product_name}: Inventory available. Proceed with payment.")
                 # Logic to proceed with payment or further processing
             else:
-                print(f"Product {product_name}: Inventory not available. Notify user.")
+                logging.info(f"Product {product_name}: Inventory not available. Notify user.")
                 # Logic to handle inventory not available scenario
     finally:
         await consumer.stop()
@@ -182,10 +192,10 @@ async def consume_payment_response(producer):
             order_id = response_data['order_id']
             status = response_data['status']
             if status == "paid":
-                print(f"Order {order_id}: Payment confirmed. Order is now confirmed.")
+                logging.info(f"Order {order_id}: Payment confirmed. Order is now confirmed.")
                 # Logic to mark order as confirmed
             else:
-                print(f"Order {order_id}: Payment not confirmed.")
+                logging.info(f"Order {order_id}: Payment not confirmed.")
                 # Logic to handle failed payment or further processing
     finally:
         await consumer.stop()

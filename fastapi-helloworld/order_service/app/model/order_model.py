@@ -1,13 +1,14 @@
+from typing import Optional
 from sqlmodel import SQLModel, Field
 
 class Order(SQLModel, table=True):
-    id: int = Field(default=None, primary_key=True)
-    customer_name: str = Field(max_length=100)
-    product_id: int  # Add this field to reference the product being ordered
-    product_name: str = Field(max_length=100)  # Add this field to store the product name
+    id: Optional[int] = Field(default=None, primary_key=True)
+    userid: int
+    product_id: int
+    product_name: str
     quantity: int
     total_amount: float
-    is_paid: bool = Field(default=False)
+    is_paid: bool
     
 class OrderUpdate(SQLModel):
     product_id: int = None  # Optional field for updating product information
