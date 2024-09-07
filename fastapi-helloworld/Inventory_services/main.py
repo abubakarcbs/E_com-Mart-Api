@@ -24,8 +24,10 @@ producer = AIOKafkaProducer(bootstrap_servers='broker:19092')
 
 @app.on_event("startup")
 async def startup_event():
-    # Create tables
+    logging.info('Creating Tables...')
     create_tables()
+    
+    logging.info("Tables Created...")
     
     # Start the Kafka producer
     await producer.start()
@@ -39,7 +41,7 @@ async def shutdown_event():
     # Stop the Kafka producer
     await producer.stop()
 
-    # Note: Consumers will automatically stop when the application shuts down
+    logging.info("Kafka producer stopped")
 
 @app.get("/")
 def welcome():

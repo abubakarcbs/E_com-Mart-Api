@@ -8,7 +8,8 @@ from app.model.order_model import Order, OrderUpdate
 import json
 import asyncio
 import logging
-from get_email import get_user_email
+import httpx
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,8 +25,8 @@ async def lifespan(app: FastAPI):
     await start_producer(app.state.producer)
     
     # Start Kafka Consumers as background tasks
-    inventory_consumer_task = asyncio.create_task(consume_inventory_response(app.state.producer))
-    payment_consumer_task = asyncio.create_task(consume_payment_response(app.state.producer))
+    inventory_consumer_task = asyncio.create_task(consume_inventory_response())
+    payment_consumer_task = asyncio.create_task(consume_payment_response())
     
     yield
     
@@ -38,6 +39,10 @@ async def lifespan(app: FastAPI):
     await inventory_consumer_task
     await payment_consumer_task
 
+
+USER_SERVICE_URL = "http://user_services:8005"  # Using service name instead of localhost
+
+
 app = FastAPI(lifespan=lifespan, title="Order Service API", 
     version="0.0.1",
     servers=[
@@ -47,6 +52,7 @@ app = FastAPI(lifespan=lifespan, title="Order Service API",
         }
     ]
 )
+
 
 async def start_producer(producer):
     retries = 5
@@ -60,9 +66,11 @@ async def start_producer(producer):
             await asyncio.sleep(5)
     raise ConnectionError("Failed to connect to Kafka broker after multiple attempts")
 
+
 @app.get("/")
 def read_root():
     return {"Hello": "from order service"}
+
 
 @app.post("/order")
 async def create_order(
@@ -70,16 +78,10 @@ async def create_order(
     session: Annotated[Session, Depends(get_session)],
     producer: AIOKafkaProducer = Depends(lambda: app.state.producer)
 ):
-    # First, attempt to fetch the user's email using user_id
-    try:
-        user_email = get_user_email(order.userid)  # Fetch email via API using user_id
-    except HTTPException as e:
-        logging.error(f"Failed to retrieve email for user ID '{order.userid}': {e.detail}")
-        raise HTTPException(status_code=e.status_code, detail=e.detail)
-
     # Attempt to save the order to the database
     try:
         db_order = Order(**order.dict())  
+        db_order.status = "Pending"  # Set the initial status to "Pending"
         session.add(db_order)             
         session.commit()                  
         session.refresh(db_order)
@@ -92,16 +94,12 @@ async def create_order(
         order_dict = db_order.dict()
         order_json = json.dumps(order_dict).encode("utf-8")
 
-        # Produce to the first Kafka topic
         await producer.send_and_wait("order_topic", order_json)
 
-        # Now produce the order confirmation message to Kafka
         order_confirmation_message = json.dumps({
             "event": "order_placed",
             "order_id": db_order.id,
-            "user_id": db_order.userid,
-            "user_email": user_email,
-            "order_details": f"Product ID: {db_order.product_id}, Quantity: {db_order.quantity}, Total Price: {db_order.total_amount}",
+            "order_details": f"Product ID: {db_order.product_id}, Quantity: {db_order.quantity}",
             "timestamp": asyncio.get_event_loop().time()
         }).encode("utf-8")
 
@@ -114,16 +112,16 @@ async def create_order(
     return db_order
 
 
-
-
-    
-
 @app.get("/order/{order_id}")
-def get_order(order_id: int, session: Annotated[Session, Depends(get_session)]):
+async def get_order(
+    order_id: int,
+    session: Annotated[Session, Depends(get_session)]
+):
     order = session.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     return order
+
 
 @app.put("/order/{order_id}")
 async def update_order(
@@ -135,6 +133,7 @@ async def update_order(
     db_order = session.get(Order, order_id)
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
     for field, value in order.dict().items():
         setattr(db_order, field, value)
     session.commit()
@@ -147,17 +146,23 @@ async def update_order(
     
     return db_order
 
+
 @app.delete("/order/{order_id}")
-def delete_order(order_id: int, session: Annotated[Session, Depends(get_session)]):
+async def delete_order(
+    order_id: int,
+    session: Annotated[Session, Depends(get_session)]
+):
     order = session.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
     session.delete(order)
     session.commit()
     return order
 
+
 # Kafka Consumer for Inventory Responses
-async def consume_inventory_response(producer):
+async def consume_inventory_response():
     consumer = AIOKafkaConsumer(
         'inventory_response_topic',
         bootstrap_servers='broker:19092',
@@ -167,19 +172,26 @@ async def consume_inventory_response(producer):
     try:
         async for msg in consumer:
             response_data = json.loads(msg.value.decode('utf-8'))
-            product_name = response_data['product_name']
+            order_id = response_data['order_id']
             is_available = response_data['is_available']
+
+            session = next(get_session())
+            order = session.get(Order, order_id)
+
             if is_available:
-                logging.info(f"Product {product_name}: Inventory available. Proceed with payment.")
-                # Logic to proceed with payment or further processing
+                order.status = "Placed"  # Update status to "Placed"
+                logging.info(f"Order {order_id}: Inventory confirmed. Status updated to 'Placed'.")
             else:
-                logging.info(f"Product {product_name}: Inventory not available. Notify user.")
-                # Logic to handle inventory not available scenario
+                order.status = "Failed"  # Update status to "Failed"
+                logging.info(f"Order {order_id}: Inventory not available. Status updated to 'Failed'.")
+
+            session.commit()  # Save the updated status to the database
     finally:
         await consumer.stop()
 
+
 # Kafka Consumer for Payment Responses
-async def consume_payment_response(producer):
+async def consume_payment_response():
     consumer = AIOKafkaConsumer(
         'payment_response_topic',
         bootstrap_servers='broker:19092',
@@ -191,11 +203,17 @@ async def consume_payment_response(producer):
             response_data = json.loads(msg.value.decode('utf-8'))
             order_id = response_data['order_id']
             status = response_data['status']
+
+            session = next(get_session())
+            order = session.get(Order, order_id)
+
             if status == "paid":
-                logging.info(f"Order {order_id}: Payment confirmed. Order is now confirmed.")
-                # Logic to mark order as confirmed
+                order.status = "Confirmed"  # Update status to "Confirmed"
+                logging.info(f"Order {order_id}: Payment confirmed. Status updated to 'Confirmed'.")
             else:
-                logging.info(f"Order {order_id}: Payment not confirmed.")
-                # Logic to handle failed payment or further processing
+                order.status = "Failed"  # Update status to "Failed"
+                logging.info(f"Order {order_id}: Payment failed. Status updated to 'Failed'.")
+
+            session.commit()  # Save the updated status to the database
     finally:
         await consumer.stop()

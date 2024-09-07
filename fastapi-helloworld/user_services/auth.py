@@ -18,9 +18,9 @@ oauth_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 pwd_context = CryptContext(schemes="bcrypt")
 
 
+
 def hash_password(password):
     return pwd_context.hash(password)
-
 
 def verify_password(password, hash_password):
     return pwd_context.verify(password, hash_password)
@@ -53,16 +53,20 @@ def authenticate_user(username,
     return db_user
 
 
-def create_access_token(data: dict, expiry_time: timedelta | None):
-    data_to_encode = data.copy()
-    if expiry_time:
-        expire = datetime.now(timezone.utc) + expiry_time
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
-    data_to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(
-        data_to_encode, SECRET_KEY, algorithm=ALGORITHYM, )
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    
+    # Include user role in the token
+    to_encode.update({"role": data.get("role")})
+
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHYM)
     return encoded_jwt
+
 
 
 def current_user(token: Annotated[str, Depends(oauth_scheme)],
@@ -123,3 +127,25 @@ def validate_refresh_token(token: str,
     if not user:
         raise credential_exception
     return user
+
+
+def check_role(required_role: str):
+    def role_checker(session: Annotated[Session, Depends(get_session)], token: str = Depends(oauth_scheme)):
+        credentials_exception = HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHYM])
+            username: str = payload.get("sub")
+            if username is None:
+                raise credentials_exception
+            user = get_user_from_db(session, username=username)
+            if user is None or user.role != required_role:
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+        except JWTError:
+            raise credentials_exception
+    return role_checker
+
+

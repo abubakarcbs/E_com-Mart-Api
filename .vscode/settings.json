@@ -1,0 +1,6 @@
+{
+    "python.analysis.extraPaths": [
+        "/Users/a1234/Library/Caches/pypoetry/virtualenvs/fastapi-helloworld-WBoMQ3II-py3.12/lib/python3.12/site-packages",
+        "./fastapi-helloworld/user_services"
+    ]
+}

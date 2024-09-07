@@ -1,18 +1,19 @@
 from datetime import timedelta
 from typing import Annotated
 from fastapi.security import OAuth2PasswordRequestForm
+from router import user
 from sqlmodel import Session
 from fastapi import Depends, FastAPI, HTTPException, status
 from contextlib import asynccontextmanager
 from app.db import create_tables, get_session
 from model import Token, User
-from router import user
-from auth import EXPIRY_TIME, authenticate_user, create_access_token, create_refresh_token, validate_refresh_token
+from auth import EXPIRY_TIME, authenticate_user, check_role, create_access_token, create_refresh_token, validate_refresh_token
 from aiokafka import AIOKafkaProducer
 import json
 import asyncio
 import logging
 from aiokafka.errors import KafkaError
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -39,6 +40,7 @@ app.include_router(router=user.user_router)
 @app.get('/')
 async def root():
     return {"message": "Welcome to user services"}
+
 
 # Kafka Producer as a dependency
 async def get_kafka_producer():
@@ -163,3 +165,7 @@ def read_user(userid: int, db: Session = Depends(get_session)):
     if not user:
         raise HTTPException(status_code=404, detail=f"User with ID '{userid}' not found.")
     return user
+
+# @app.get("/users/me")
+# async def get_user_me(current_user: dict = Depends(current_user)):
+#     return {"username": current_user.username, "role": current_user.role}
