@@ -96,42 +96,31 @@ async def create_order(
     except HTTPException as e:
         raise e  # Return the same error if fetching the user email fails
 
-    try:
-        # Attempt to save the order to the database
-        db_order = Order(**order.dict())
-        db_order.status = "Pending"  # Set the initial status to "Pending"
-        session.add(db_order)
-        session.commit()
-        session.refresh(db_order)
-    except Exception as e:
-        logging.error(f"Failed to save order to the database: {e}")
-        session.rollback()
-        raise HTTPException(status_code=500, detail="Failed to save order to the database.")
+    # Prepare order for inventory check
+    order_dict = order.dict()
 
     try:
-        # Produce Kafka messages
-        order_dict = db_order.dict()
-        order_json = json.dumps(order_dict).encode("utf-8")
+        # Send a Kafka message to check inventory availability
+        inventory_check_message = json.dumps({
+            "order_id": order.id,
+            "product_id": order.product_id,
+            "quantity": order.quantity
+        }).encode('utf-8')
 
-        await producer.send_and_wait("order_topic", order_json)
-
-        # Send notification via Kafka with user email included
-        order_confirmation_message = json.dumps({
-            "event": "order_placed",
-            "order_id": db_order.id,
-            "order_details": f"Product ID: {db_order.product_id}, Quantity: {db_order.quantity}",
-            "user_email": user_email,
-            "timestamp": asyncio.get_event_loop().time()
-        }).encode("utf-8")
-
-        await producer.send_and_wait("order_events", order_confirmation_message)
-        logging.info(f"Order {db_order.id} created and notification sent via Kafka.")
+        await producer.send_and_wait("order_topic", inventory_check_message)
+        logging.info(f"Sent inventory check for order {order.id}")
     except Exception as e:
-        logging.error(f"Order {db_order.id} created but failed to send notification via Kafka: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to process order notification due to: {e}")
+        logging.error(f"Failed to send inventory check: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check inventory.")
 
-    return db_order
+    # The order will be marked as Pending until the inventory response is received
+    db_order = Order(**order_dict)
+    db_order.status = "Pending"
+    session.add(db_order)
+    session.commit()
+    session.refresh(db_order)
 
+    return {"status": "Order created. Awaiting inventory confirmation.", "order_id": db_order.id}
 
 
 @app.get("/order/{order_id}")
@@ -182,7 +171,6 @@ async def delete_order(
     session.commit()
     return order
 
-
 # Kafka Consumer for Inventory Responses
 async def consume_inventory_response():
     consumer = AIOKafkaConsumer(
@@ -200,6 +188,10 @@ async def consume_inventory_response():
             session = next(get_session())
             order = session.get(Order, order_id)
 
+            if not order:
+                logging.error(f"Order {order_id} not found in database.")
+                continue
+
             if is_available:
                 order.status = "Placed"  # Update status to "Placed"
                 logging.info(f"Order {order_id}: Inventory confirmed. Status updated to 'Placed'.")
@@ -208,6 +200,18 @@ async def consume_inventory_response():
                 logging.info(f"Order {order_id}: Inventory not available. Status updated to 'Failed'.")
 
             session.commit()  # Save the updated status to the database
+
+            # Send a notification via Kafka after updating the order status
+            notification_message = json.dumps({
+                "event": "inventory_check",
+                "order_id": order.id,
+                "status": order.status,
+                "user_email": order.username  # Assuming the username is the email
+            }).encode("utf-8")
+
+            await app.state.producer.send_and_wait("order_events", notification_message)
+            logging.info(f"Notification for order {order_id} sent to 'order_events'.")
+            
     finally:
         await consumer.stop()
 

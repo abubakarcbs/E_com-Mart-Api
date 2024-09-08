@@ -101,28 +101,36 @@ async def consume_order_messages():
             order_data = json.loads(msg.value.decode('utf-8'))
             logging.info(f"Received order data: {order_data}")
             
-            # Retrieve product name for response
             session = next(get_session())
             product_id = order_data['product_id']
             inventory_item = session.get(Inventorys, product_id)
             
-            if inventory_item:
-                product_name = inventory_item.name
-                is_available = reserve_inventory(order_data)  # Reserve inventory only if the item exists
+            if inventory_item and inventory_item.quantity >= order_data['quantity']:
+                # Reserve the inventory
+                inventory_item.quantity -= order_data['quantity']
+                session.commit()
+
+                # Send inventory confirmation
+                response = {
+                    "order_id": order_data['order_id'],
+                    "is_available": True
+                }
+                logging.info(f"Reserved inventory for product {product_id}, order {order_data['order_id']}")
             else:
-                product_name = "Unknown Product"
-                is_available = False  # Mark as not available since the product doesn't exist
-            
-            response = {
-                "product_name": product_name,
-                "is_available": is_available
-            }
-            
+                # Inventory not available
+                response = {
+                    "order_id": order_data['order_id'],
+                    "is_available": False
+                }
+                logging.warning(f"Inventory not available for product {product_id}, order {order_data['order_id']}")
+
+            # Send the response back to the order service
             response_json = json.dumps(response).encode('utf-8')
             await producer.send_and_wait("inventory_response_topic", response_json)
-            logging.info(f"Sent inventory response for product {product_name}")
+            logging.info(f"Sent inventory response for order {order_data['order_id']}")
     finally:
         await consumer.stop()
+
 
 async def consume_product_messages():
     consumer = AIOKafkaConsumer(
