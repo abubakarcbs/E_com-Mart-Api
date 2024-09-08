@@ -11,21 +11,25 @@ import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.db.db import get_session
-# from user_services.model import User
-
-app = FastAPI()
+import re  # Import regex module for email validation
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 
 # Replace with your actual Gmail credentials and App Password
 GMAIL_USER = os.getenv("GMAIL_USER", "muhammadabubakarcbs@gmail.com")
-GMAIL_PASSWORD = os.getenv("GMAIL_PASSWORD", "zfzz rhbj dpey nopv")
+GMAIL_PASSWORD = os.getenv("GMAIL_PASSWORD", "zfzz rhbj dpey nopv")  # Ensure this is set securely
 
 class EmailSchema(BaseModel):
     email: EmailStr
     subject: str
     message: str
+
+app = FastAPI()
+
+def is_valid_email(email: str) -> bool:
+    # Simple regex for validating an email
+    return re.match(r"[^@]+@[^@]+\.[^@]+", email) is not None
 
 async def send_email(to_email: str, subject: str, message: str):
     try:
@@ -77,37 +81,51 @@ async def consume_events():
                 logging.info(f"Received event: {event_data}")
 
                 if event_data['event'] == 'user_registration':
+                    user_email = event_data.get('email')
+                    if not user_email or not is_valid_email(user_email):
+                        logging.error(f"Invalid or missing 'email' in event: {event_data}")
+                        continue  # Skip processing this event
                     subject = "Welcome to Our Service"
                     message = f"Hello {event_data['username']}, thank you for registering!"
-                    await send_email(event_data['email'], subject, message)
+                    await send_email(user_email, subject, message)
 
                 elif event_data['event'] == 'order_placed':
+                    user_email = event_data.get('user_email')
+                    if not user_email or not is_valid_email(user_email):
+                        logging.error(f"Invalid or missing 'user_email' in event: {event_data}")
+                        continue  # Skip processing this event
                     subject = "Order Confirmation"
                     message = f"Your order with ID {event_data['order_id']} has been placed successfully."
-                    await send_email(event_data['user_email'], subject,message)
+                    await send_email(user_email, subject, message)
 
                 elif event_data['event'] == 'payment_processed':
+                    user_email = event_data.get('user_email')
+                    if not user_email or not is_valid_email(user_email):
+                        logging.error(f"Invalid or missing 'user_email' in event: {event_data}")
+                        continue  # Skip processing this event
                     subject = "Payment Confirmation"
                     message = f"Your payment for order ID {event_data['order_id']} has been processed successfully."
-                    await send_email(event_data['user_email'], subject, message)
+                    await send_email(user_email, subject, message)
 
                 elif event_data['event'] == 'user_login':
+                    user_email = event_data.get('email')
+                    if not user_email or not is_valid_email(user_email):
+                        logging.error(f"Invalid or missing 'email' in event: {event_data}")
+                        continue  # Skip processing this event
                     subject = "Login Notification"
                     message = f"Hello {event_data['username']}, you have successfully logged in."
-                    await send_email(event_data['email'], subject, message)
+                    await send_email(user_email, subject, message)
 
                 elif event_data['event'] == 'token_refresh':
+                    user_email = event_data.get('email')
+                    if not user_email or not is_valid_email(user_email):
+                        logging.error(f"Invalid or missing 'email' in event: {event_data}")
+                        continue  # Skip processing this event
                     subject = "Token Refreshed"
                     message = f"Hello {event_data['username']}, your token has been refreshed."
-                    await send_email(event_data['email'], subject, message)
+                    await send_email(user_email, subject, message)
 
             except Exception as e:
                 logging.error(f"Failed to process message: {e}")
     finally:
         await consumer.stop()
-
-# def get_user_email(user_id: int, session: Session = Depends(get_session)) -> str:
-#     user = session.query(User).filter(User.userid == user_id).first()  # Ensure you use the correct model name
-#     if not user:
-#         raise HTTPException(status_code=404, detail=f"User with ID '{user_id}' not found.")
-#     return user.email

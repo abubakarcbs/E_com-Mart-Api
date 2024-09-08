@@ -51,6 +51,14 @@ async def get_kafka_producer():
     finally:
         await producer.stop()
 
+@app.get("/users/email/{username}")
+async def get_user_email(username: str, db: Session = Depends(get_session)):
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User with username '{username}' not found.")
+    return {"email": user.email, "name": user.username}
+
+
 # Function to produce Kafka messages with logging and exception handling
 async def produce_kafka_message(producer, topic, message):
     try:

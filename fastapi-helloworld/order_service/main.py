@@ -72,12 +72,30 @@ def read_root():
     return {"Hello": "from order service"}
 
 
+async def get_user_email(username: str):
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(f"{USER_SERVICE_URL}/users/email/{username}")
+            response.raise_for_status()
+            user_data = response.json()
+            return user_data['email'], user_data['name']
+        except httpx.HTTPStatusError as e:
+            logging.error(f"Failed to fetch user email: {e}")
+            raise HTTPException(status_code=404, detail=f"User with username '{username}' not found")
+
+
 @app.post("/order")
 async def create_order(
     order: Order, 
     session: Annotated[Session, Depends(get_session)],
     producer: AIOKafkaProducer = Depends(lambda: app.state.producer)
 ):
+    # Fetch user email using the username
+    try:
+        user_email, user_name = await get_user_email(order.username)
+    except HTTPException as e:
+        raise e  # Return the same error if fetching the user email fails
+
     try:
         # Attempt to save the order to the database
         db_order = Order(**order.dict())
@@ -97,10 +115,12 @@ async def create_order(
 
         await producer.send_and_wait("order_topic", order_json)
 
+        # Send notification via Kafka with user email included
         order_confirmation_message = json.dumps({
             "event": "order_placed",
             "order_id": db_order.id,
             "order_details": f"Product ID: {db_order.product_id}, Quantity: {db_order.quantity}",
+            "user_email": user_email,
             "timestamp": asyncio.get_event_loop().time()
         }).encode("utf-8")
 
@@ -111,6 +131,7 @@ async def create_order(
         raise HTTPException(status_code=500, detail=f"Failed to process order notification due to: {e}")
 
     return db_order
+
 
 
 @app.get("/order/{order_id}")
