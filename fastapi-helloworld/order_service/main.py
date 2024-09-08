@@ -78,19 +78,20 @@ async def create_order(
     session: Annotated[Session, Depends(get_session)],
     producer: AIOKafkaProducer = Depends(lambda: app.state.producer)
 ):
-    # Attempt to save the order to the database
     try:
-        db_order = Order(**order.dict())  
+        # Attempt to save the order to the database
+        db_order = Order(**order.dict())
         db_order.status = "Pending"  # Set the initial status to "Pending"
-        session.add(db_order)             
-        session.commit()                  
+        session.add(db_order)
+        session.commit()
         session.refresh(db_order)
     except Exception as e:
+        logging.error(f"Failed to save order to the database: {e}")
         session.rollback()
         raise HTTPException(status_code=500, detail="Failed to save order to the database.")
 
-    # If the order is saved, produce the Kafka messages
     try:
+        # Produce Kafka messages
         order_dict = db_order.dict()
         order_json = json.dumps(order_dict).encode("utf-8")
 
@@ -106,8 +107,8 @@ async def create_order(
         await producer.send_and_wait("order_events", order_confirmation_message)
         logging.info(f"Order {db_order.id} created and notification sent via Kafka.")
     except Exception as e:
-        logging.error(f"Order {db_order.id} created but failed to send notification via Kafka: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to process order notification due to: {str(e)}")
+        logging.error(f"Order {db_order.id} created but failed to send notification via Kafka: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process order notification due to: {e}")
 
     return db_order
 

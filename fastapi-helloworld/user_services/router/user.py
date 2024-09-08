@@ -10,6 +10,8 @@ from auth import check_role, current_user, get_user_from_db, hash_password, oaut
 from app.db import get_session
 from model import Register_User, User
 
+import smtplib
+from email.message import EmailMessage
 
 user_router = APIRouter(
     prefix="/user",
@@ -56,7 +58,7 @@ async def register_user(new_user: Annotated[Register_User, Depends()],
     session.commit()
     session.refresh(user)
 
-    # Send registration email notification
+    # # Send registration email notification
     email_sent = send_registration_email(user_email=user.email, username=user.username)
     if not email_sent:
         # Optionally handle the case where email sending fails
@@ -76,7 +78,23 @@ async def register_user(new_user: Annotated[Register_User, Depends()],
     return {"message": f"User with {user.username} successfully registered"}
 
 
-
 @user_router.get('/me')
 async def user_profile (current_user:Annotated[User, Depends(current_user)]):
     return current_user
+
+
+def send_registration_email(user_email: str, username: str) -> bool:
+    try:
+        msg = EmailMessage()
+        msg.set_content(f"Hello {username},\n\nYour registration was successful!")
+        msg["Subject"] = "Registration Successful"
+        msg["From"] = "muhammadabubakarcbs@gmail.com"
+        msg["To"] = user_email
+
+        with smtplib.SMTP("localhost") as server:
+            server.send_message(msg)
+        
+        return True
+    except Exception as e:
+        logging.error(f"Failed to send registration email: {e}")
+        return False

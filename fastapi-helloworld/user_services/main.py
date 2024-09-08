@@ -169,3 +169,31 @@ def read_user(userid: int, db: Session = Depends(get_session)):
 # @app.get("/users/me")
 # async def get_user_me(current_user: dict = Depends(current_user)):
 #     return {"username": current_user.username, "role": current_user.role}
+
+
+@app.delete("/user/{userid}")
+async def delete_user(userid: int, session: Annotated[Session, Depends(get_session)], producer: AIOKafkaProducer = Depends(get_kafka_producer)):
+    user = session.query(User).filter(User.userid == userid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User with ID '{userid}' not found.")
+    
+    try:
+        session.delete(user)
+        session.commit()
+        logging.info(f"User deleted successfully: {user.username}")
+    except Exception as e:
+        session.rollback()
+        logging.error(f"Failed to delete user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete user.")
+    
+    # Kafka message for user deletion
+    deletion_message = json.dumps({
+        "event": "user_deletion",
+        "username": user.username,
+        "email": user.email,
+        "timestamp": asyncio.get_event_loop().time()
+    }).encode("utf-8")
+    # Produce Kafka message with logging
+    await produce_kafka_message(producer, "user_events", deletion_message)
+    
+    return {"message": "User deleted successfully"}

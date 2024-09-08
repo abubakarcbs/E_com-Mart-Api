@@ -3,7 +3,7 @@ from sqlmodel import SQLModel, Field
 
 class Order(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    userid: int
+    username: str = Field(max_length=100)
     product_id: int
     product_name: str
     quantity: int
