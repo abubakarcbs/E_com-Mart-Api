@@ -25,7 +25,7 @@ services:
       - broker
       - postgres_product_db
     ports:
-      - "8002:8002" # Expose container port 8000 to host port 8000
+      - "8009:8009" # Expose container port 8000 to host port 8000
 
   order_service:
     image: order-mart-api:latest
@@ -51,7 +51,7 @@ services:
       - broker
       - postgres_inventory_db
     ports:
-      - "8001:8001" # Expose container port 8000 to host port 8000
+      - "8010:8010" # Expose container port 8000 to host port 8000
 
   notification_service:
     image: notification-mart-api:latest
@@ -64,7 +64,7 @@ services:
       - broker
       - postgres_notification_db
     ports:
-      - "8000:8000" # Expose container port 8000 to host port 8000
+      - "8008:8008" # Expose container port 8000 to host port 8000
 
 
   payment_service:
@@ -96,6 +96,89 @@ services:
   #     - postgres_db
   #   ports:
   #     - "8008:8008" # Expose container port 8000 to host port 8000
+
+
+
+
+
+
+
+
+
+
+
+
+
+  postgres:
+    image: postgres:latest
+    restart: always
+    container_name: kong-database
+    environment:
+      POSTGRES_USER: "kong"
+      POSTGRES_PASSWORD: "kong"
+      POSTGRES_DB: "kong"
+    ports:
+      - "5488:5432"
+
+
+  kong-bootstrap:
+    image: kong:3.6.1-ubuntu
+    container_name: kong-bootstrap
+    hostname: kong-bootstrap
+    depends_on:
+      - postgres
+    environment:
+      KONG_DATABASE: "postgres"
+      KONG_PG_HOST: "kong-database"
+      KONG_PG_DATABASE: "kong"
+      KONG_PG_USER: "kong"
+      KONG_PG_PASSWORD: "kong"
+    command: "kong migrations bootstrap"
+    restart: "on-failure"
+
+  kong:
+    image: kong:3.6.1-ubuntu
+    restart: always
+    container_name: kong
+    hostname: kong
+    depends_on:
+      - kong-bootstrap
+    environment:
+      KONG_DATABASE: "postgres"
+      KONG_PG_HOST: "kong-database"
+      KONG_PG_DATABASE: "kong"
+      KONG_PG_USER: "kong"
+      KONG_PG_PASSWORD: "kong"
+      KONG_PROXY_ACCESS_LOG: "/dev/stdout"
+      KONG_ADMIN_ACCESS_LOG: "/dev/stdout"
+      KONG_PROXY_ERROR_LOG: "/dev/stderr"
+      KONG_ADMIN_ERROR_LOG: "/dev/stderr"
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001, 0.0.0.0:8444 ssl"
+      KONG_ADMIN_GUI_LISTEN: "0.0.0.0:8002, 0.0.0.0:8445 ssl"
+      KONG_DECLARATIVE_CONFIG: "/opt/kong/kong.yaml"
+    command: "kong start"
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8002:8002"
+      # - "8003:8003"
+      - "8004:8004"
+      # - "8005:8005"
+      - "8006:8006"
+      # - "8007:8007"
+      # - "8008:8008"
+      # - "8009:8009" 
+      - "8443:8443"
+      - "8444:8444"
+      - "8445:8445"
+    volumes:
+      - ./config:/opt/kong
+
+
+
+
+
+
 
 
 

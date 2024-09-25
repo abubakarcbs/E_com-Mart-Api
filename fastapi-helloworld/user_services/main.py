@@ -7,12 +7,14 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from contextlib import asynccontextmanager
 from app.db import create_tables, get_session
 from model import Token, User
-from auth import EXPIRY_TIME, authenticate_user, check_role, create_access_token, create_refresh_token, validate_refresh_token
+from auth import EXPIRY_TIME, authenticate_user, check_role, create_access_token, create_refresh_token, validate_refresh_token, current_user, TokenData, create_jwt_token, get_secret_from_kong
 from aiokafka import AIOKafkaProducer
 import json
 import asyncio
 import logging
 from aiokafka.errors import KafkaError
+
+
 
 
 # Set up logging
@@ -205,3 +207,14 @@ async def delete_user(userid: int, session: Annotated[Session, Depends(get_sessi
     await produce_kafka_message(producer, "user_events", deletion_message)
     
     return {"message": "User deleted successfully"}
+
+
+
+        
+
+@app.post("/generate-token/")
+async def generate_token(data: TokenData, consumer_id: str):
+    secret = get_secret_from_kong(consumer_id)
+    payload = {"iss": data.iss}
+    token = create_jwt_token(payload, secret)
+    return {"token": token}

@@ -7,10 +7,11 @@ from typing import Optional
 
 class Payment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    userid: int 
+    username: str
     order_id: int
     status: str
-    # created_at: datetime = Field(default_factory=datetime.utcnow)
+    amount: int  # Add the missing amount field
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class PaymentIntentCreate(BaseModel):
     amount: Annotated[
@@ -27,11 +28,7 @@ class PaymentIntentCreate(BaseModel):
     ]  # Defaulting to ["card"]
 
 class PaymentCreate(SQLModel):
-    email: Annotated[
-        str,
-        Form(),
-    ]
-    name: Annotated[
+    username: Annotated[
         str,
         Form(),
     ]
@@ -42,7 +39,7 @@ class PaymentCreate(SQLModel):
     amount: Annotated[
         int,
         Form(),
-    ]
+    ]  # Added the amount field in the request model
     status: Annotated[
         str,
         Form(),

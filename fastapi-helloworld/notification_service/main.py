@@ -80,24 +80,35 @@ async def consume_events():
                 event_data = json.loads(msg.value.decode('utf-8'))
                 logging.info(f"Received event: {event_data}")
 
-                if event_data['event'] == 'user_registration':
-                    user_email = event_data.get('email')
-                    if not user_email or not is_valid_email(user_email):
-                        logging.error(f"Invalid or missing 'email' in event: {event_data}")
-                        continue  # Skip processing this event
-                    subject = "Welcome to Our Service"
-                    message = f"Hello {event_data['username']}, thank you for registering!"
-                    await send_email(user_email, subject, message)
+                # Skip order_creation events
+                if event_data['event'] == 'order_creation':
+                    logging.info(f"Skipping event: {event_data['event']}")
+                    continue
 
-                elif event_data['event'] == 'order_placed':
+                # Process inventory_check events
+                elif event_data['event'] == 'inventory_check':
                     user_email = event_data.get('user_email')
+                    order_status = event_data.get('status')
+                    
                     if not user_email or not is_valid_email(user_email):
                         logging.error(f"Invalid or missing 'user_email' in event: {event_data}")
                         continue  # Skip processing this event
-                    subject = "Order Confirmation"
-                    message = f"Your order with ID {event_data['order_id']} has been placed successfully."
+                    
+                    # Customize the email subject and message based on the order status
+                    if order_status == "Placed":
+                        subject = "Order Placed Successfully"
+                        message = f"Your order with ID {event_data['order_id']} has been placed successfully."
+                    elif order_status == "Failed":
+                        subject = "Order Placement Failed"
+                        message = f"Unfortunately, your order with ID {event_data['order_id']} could not be placed due to inventory issues."
+                    else:
+                        subject = "Order Status Update"
+                        message = f"Your order with ID {event_data['order_id']} is currently {order_status}."
+
+                    # Send the email
                     await send_email(user_email, subject, message)
 
+                # Handle payment processed events if needed (optional)
                 elif event_data['event'] == 'payment_processed':
                     user_email = event_data.get('user_email')
                     if not user_email or not is_valid_email(user_email):
@@ -105,24 +116,6 @@ async def consume_events():
                         continue  # Skip processing this event
                     subject = "Payment Confirmation"
                     message = f"Your payment for order ID {event_data['order_id']} has been processed successfully."
-                    await send_email(user_email, subject, message)
-
-                elif event_data['event'] == 'user_login':
-                    user_email = event_data.get('email')
-                    if not user_email or not is_valid_email(user_email):
-                        logging.error(f"Invalid or missing 'email' in event: {event_data}")
-                        continue  # Skip processing this event
-                    subject = "Login Notification"
-                    message = f"Hello {event_data['username']}, you have successfully logged in."
-                    await send_email(user_email, subject, message)
-
-                elif event_data['event'] == 'token_refresh':
-                    user_email = event_data.get('email')
-                    if not user_email or not is_valid_email(user_email):
-                        logging.error(f"Invalid or missing 'email' in event: {event_data}")
-                        continue  # Skip processing this event
-                    subject = "Token Refreshed"
-                    message = f"Hello {event_data['username']}, your token has been refreshed."
                     await send_email(user_email, subject, message)
 
             except Exception as e:

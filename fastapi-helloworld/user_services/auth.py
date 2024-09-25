@@ -1,5 +1,6 @@
 from passlib.context import CryptContext
 from sqlmodel import Session, select
+from sqlmodel import SQLModel
 from typing import Annotated
 from app.db import get_session
 from fastapi import Depends, HTTPException, status
@@ -7,6 +8,8 @@ from model import RefreshTokenData, TokenData, User
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from datetime import datetime, timezone, timedelta
+import httpx
+
 
 
 SECRET_KEY = 'ed60732905aeb0315e2f77d05a6cb57a0e408eaf2cb9a77a5a2667931c50d4e0'
@@ -148,4 +151,58 @@ def check_role(required_role: str):
             raise credentials_exception
     return role_checker
 
+
+
+
+
+
+
+
+
+
+
+
+# SECRET_KEY = "DPZau2JXU0OnZXMYKjgOOAQbXgGRNknZ"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 2
+class TokenData(SQLModel):
+    iss: str
+
+def get_secret_from_kong(consumer_id: str) -> str:
+    with httpx.Client() as client:
+        print(f'consumer_id: {consumer_id}')
+        url = f"http://kong:8001/consumers/{consumer_id}/jwt"
+        response = client.get(url)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code,
+                                detail="Failed to fetch secret from Kong")
+        kong_data = response.json()
+        print(f'Kong Data: {kong_data}')
+        if not kong_data['data'][0]["secret"]:
+            raise HTTPException(
+                status_code=404, detail="No JWT credentials found for the specified consumer")
+
+        secret = kong_data['data'][0]["secret"]
+        print(f'Secret: {secret}')
+        return secret
+
+
+
+
+
+
+def create_jwt_token(data: dict, secret: str):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + \
+        timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # Limit expiration time to 2038-01-19 03:14:07 UTC
+    expire = min(expire, datetime(2038, 1, 19, 3, 14, 7))
+    to_encode.update({"exp": expire})
+    headers = {
+        "typ": "JWT",
+        "alg": ALGORITHM
+    }
+    encoded_jwt = jwt.encode(to_encode, secret,
+                             algorithm=ALGORITHM, headers=headers)
+    return encoded_jwt
 

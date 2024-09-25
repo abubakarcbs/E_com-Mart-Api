@@ -99,8 +99,26 @@ async def create_order(
     # Prepare order for inventory check
     order_dict = order.dict()
 
+    # Create the order with Pending status
+    db_order = Order(**order_dict)
+    db_order.status = "Pending"
+    session.add(db_order)
+    session.commit()
+    session.refresh(db_order)
+
+    # Send notification with pending status using the actual email
+    notification_message = json.dumps({
+        "event": "order_creation",
+        "order_id": db_order.id,
+        "status": db_order.status,  # Status is "Pending"
+        "user_email": user_email  # Use actual email
+    }).encode("utf-8")
+
+    await producer.send_and_wait("order_events", notification_message)
+    logging.info(f"Notification for order {db_order.id} sent to 'order_events' with status 'Pending'.")
+
+    # Send Kafka message to check inventory availability
     try:
-        # Send a Kafka message to check inventory availability
         inventory_check_message = json.dumps({
             "order_id": order.id,
             "product_id": order.product_id,
@@ -112,13 +130,6 @@ async def create_order(
     except Exception as e:
         logging.error(f"Failed to send inventory check: {e}")
         raise HTTPException(status_code=500, detail="Failed to check inventory.")
-
-    # The order will be marked as Pending until the inventory response is received
-    db_order = Order(**order_dict)
-    db_order.status = "Pending"
-    session.add(db_order)
-    session.commit()
-    session.refresh(db_order)
 
     return {"status": "Order created. Awaiting inventory confirmation.", "order_id": db_order.id}
 
@@ -192,6 +203,7 @@ async def consume_inventory_response():
                 logging.error(f"Order {order_id} not found in database.")
                 continue
 
+            # Check inventory availability and update order status
             if is_available:
                 order.status = "Placed"  # Update status to "Placed"
                 logging.info(f"Order {order_id}: Inventory confirmed. Status updated to 'Placed'.")
@@ -202,15 +214,16 @@ async def consume_inventory_response():
             session.commit()  # Save the updated status to the database
 
             # Send a notification via Kafka after updating the order status
+            user_email, _ = await get_user_email(order.username)  # Fetch the email again
             notification_message = json.dumps({
                 "event": "inventory_check",
                 "order_id": order.id,
-                "status": order.status,
-                "user_email": order.username  # Assuming the username is the email
+                "status": order.status,  # Include the updated status
+                "user_email": user_email  # Use actual email
             }).encode("utf-8")
 
             await app.state.producer.send_and_wait("order_events", notification_message)
-            logging.info(f"Notification for order {order_id} sent to 'order_events'.")
+            logging.info(f"Notification for order {order_id} sent to 'order_events' with status '{order.status}'.")
             
     finally:
         await consumer.stop()
