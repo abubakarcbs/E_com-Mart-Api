@@ -80,8 +80,23 @@ async def consume_events():
                 event_data = json.loads(msg.value.decode('utf-8'))
                 logging.info(f"Received event: {event_data}")
 
+                # Handle payment_initiated events
+                if event_data['event'] == 'payment_initiated':
+                    user_email = event_data.get('user_email')
+                    
+                    if not user_email or not is_valid_email(user_email):
+                        logging.error(f"Invalid or missing 'user_email' in event: {event_data}")
+                        continue  # Skip processing this event
+                    
+                    # Customize the email subject and message
+                    subject = "Payment Initiated Successfully"
+                    message = f"Your payment for order ID {event_data['order_id']} has been initiated successfully. Amount: ${event_data['amount'] / 100:.2f}."
+
+                    # Send the email
+                    await send_email(user_email, subject, message)
+
                 # Skip order_creation events
-                if event_data['event'] == 'order_creation':
+                elif event_data['event'] == 'order_creation':
                     logging.info(f"Skipping event: {event_data['event']}")
                     continue
 
@@ -108,7 +123,7 @@ async def consume_events():
                     # Send the email
                     await send_email(user_email, subject, message)
 
-                # Handle payment processed events if needed (optional)
+                # Handle payment_processed events
                 elif event_data['event'] == 'payment_processed':
                     user_email = event_data.get('user_email')
                     if not user_email or not is_valid_email(user_email):

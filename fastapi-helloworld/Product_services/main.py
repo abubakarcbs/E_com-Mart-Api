@@ -18,7 +18,7 @@ app = FastAPI(lifespan=lifespan, title="Product Service API",
     version="0.0.1",
     servers=[
         {
-            "url": "http://localhost:8002",
+            "url": "http://localhost:8009",
             "description": "Development Server"
         }
     ]

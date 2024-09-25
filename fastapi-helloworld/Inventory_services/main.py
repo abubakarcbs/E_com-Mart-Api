@@ -14,7 +14,7 @@ app = FastAPI(title="Inventory Service API",
               version="0.0.1",
               servers=[
                   {
-                      "url": "http://localhost:8001",
+                      "url": "http://localhost:8010",
                       "description": "Development Server"
                   }
               ])

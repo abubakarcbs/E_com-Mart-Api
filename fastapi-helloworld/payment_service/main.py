@@ -62,10 +62,11 @@ app = FastAPI(
 async def get_user_email(username: str):
     async with httpx.AsyncClient() as client:
         try:
+            # Sending a request to the user service to fetch user data (email and name)
             response = await client.get(f"{USER_SERVICE_URL}/users/email/{username}")
-            response.raise_for_status()
-            user_data = response.json()
-            return user_data['email'], user_data['name']
+            response.raise_for_status()  # Raise exception if the request was unsuccessful
+            user_data = response.json()  # Parse the response JSON
+            return user_data['email'], user_data['name']  # Return email and name
         except httpx.HTTPStatusError as e:
             logging.error(f"Failed to fetch user email: {e}")
             raise HTTPException(status_code=404, detail=f"User with username '{username}' not found")
@@ -92,7 +93,7 @@ async def process_payment(
                     'product_data': {
                         'name': payment.username,  # Use fetched username for product name
                     },
-                    'unit_amount': int(payment.amount * 100),  # Use payment amount
+                    'unit_amount': int(payment.amount * 100),  # Use payment amount in cents
                 },
                 'quantity': 1,
             }],
@@ -108,7 +109,7 @@ async def process_payment(
         stripe_checkout_id=checkout_session.id,
         username=payment.username,
         email=user_email,  # Use fetched email
-        amount=payment.amount,  # Save the payment amount
+        amount=payment.amount,  # Use payment amount
         status='pending',
         order_id=payment.order_id
     )
@@ -122,8 +123,9 @@ async def process_payment(
         "payment_id": db_payment.id,
         "username": db_payment.username,
         "order_id": db_payment.order_id,
-        "amount": db_payment.amount,  # Use the correct amount field
+        "amount": db_payment.amount,
         "status": db_payment.status,
+        "user_email": user_email,  # Include user email in the Kafka message
         "timestamp": asyncio.get_event_loop().time()
     }).encode("utf-8")
 
@@ -131,9 +133,16 @@ async def process_payment(
 
     return {"checkout_url": checkout_session.url}
 
-
 # Simulate payment confirmation
 async def confirm_payment(session_id: str):
     await asyncio.sleep(5)  # Simulate some delay for payment confirmation
     return True  # In real use, confirm with Stripe or listen to a webhook
 
+@app.get("/payment-details/{order_id}")
+async def get_payment_details(order_id: int):
+    # Functionality to fetch and return payment details by order_id
+    payment = session.get(Payment, order_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail=f"Payment with ID '{order_id}' not found.")
+    
+    return payment
